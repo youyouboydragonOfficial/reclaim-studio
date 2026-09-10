@@ -11,12 +11,14 @@ async function showPreview(index) {
   $('preview-title').textContent = candidate.name;
   $('preview-meta').textContent = `${candidate.extension.toUpperCase()} / ${fmtSize(candidate.size)} / 確度 ${candidate.confidence}%`;
   $('preview-image').classList.add('hidden');
+  $('preview-video').classList.add('hidden');
   $('preview-empty').classList.remove('hidden');
   $('preview-empty').textContent = 'プレビューを読み取り中...';
   $('preview-modal').classList.remove('hidden');
   try {
     const preview = await window.reclaim.preview(candidate);
-    if (preview.dataUrl) { $('preview-image').src = preview.dataUrl; $('preview-image').classList.remove('hidden'); $('preview-empty').classList.add('hidden'); }
+    if (preview.dataUrl && preview.mime.startsWith('image/')) { $('preview-image').src = preview.dataUrl; $('preview-image').classList.remove('hidden'); $('preview-empty').classList.add('hidden'); }
+    else if (preview.dataUrl && preview.mime.startsWith('video/')) { $('preview-video').src = preview.dataUrl; $('preview-video').classList.remove('hidden'); $('preview-empty').classList.add('hidden'); }
     else $('preview-empty').textContent = 'この形式は画像プレビューに対応していません。ファイル情報を確認できます。';
   } catch { $('preview-empty').textContent = 'プレビューを読み取れませんでした。復元候補としては選択できます。'; }
 }

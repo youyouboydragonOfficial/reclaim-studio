@@ -64,6 +64,19 @@ function rawSource(source) {
   return drive ? `\\\\.\\${drive[1].toUpperCase()}:` : value;
 }
 
+function recycleMetadata(filePath) {
+  const name = path.basename(filePath);
+  if (!/^\$R/i.test(name)) return null;
+  const metadataPath = path.join(path.dirname(filePath), `$I${name.slice(2)}`);
+  try {
+    const data = fs.readFileSync(metadataPath);
+    if (data.length < 24) return null;
+    const originalPath = data.subarray(24).toString('utf16le').replace(/\0+$/, '');
+    const originalName = originalPath ? path.basename(originalPath) : null;
+    return originalName ? { name: originalName, originalPath } : null;
+  } catch { return null; }
+}
+
 function signatureCandidates(filePath, maxFiles, onProgress) {
   const found = [];
   const seenOffsets = new Set();
@@ -142,9 +155,11 @@ ipcMain.handle('scan-folder', async (event, root) => {
   const roots = root && root.trim() ? [root.trim()] : driveRoots().map(drive => path.join(drive, '$Recycle.Bin'));
   let count = 0;
   for (const scanRoot of roots) count += walkDirectory(scanRoot, 5000 - count, item => {
-    const ext = path.extname(item.name).slice(1).toLowerCase();
+    const metadata = recycleMetadata(item.path);
+    const displayName = metadata?.name || item.name;
+    const ext = path.extname(displayName).slice(1).toLowerCase();
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi', 'mkv', 'pdf', 'docx'].includes(ext)) {
-      results.push({ id: item.path, name: item.name, extension: ext, mime: ext, size: item.size, offset: 0, source: item.path, confidence: 100, status: '確認済み' });
+      results.push({ id: item.path, name: displayName, originalPath: metadata?.originalPath || null, extension: ext, mime: ext, size: item.size, offset: 0, source: item.path, confidence: 100, status: '確認済み' });
     }
   });
   return { results, scanned: count };
@@ -167,8 +182,8 @@ ipcMain.handle('preview', async (event, candidate) => {
   try {
     const bytes = fs.readSync(fd, data, 0, size, candidate.offset || 0);
     const ext = String(candidate.extension || '').toLowerCase();
-    const mime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' }[ext] || 'application/octet-stream';
-    return { dataUrl: mime.startsWith('image/') ? `data:${mime};base64,${data.subarray(0, bytes).toString('base64')}` : null, bytes, mime };
+    const mime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime' }[ext] || 'application/octet-stream';
+    return { dataUrl: mime.startsWith('image/') || mime.startsWith('video/') ? `data:${mime};base64,${data.subarray(0, bytes).toString('base64')}` : null, bytes, mime };
   } finally { fs.closeSync(fd); }
 });
 
