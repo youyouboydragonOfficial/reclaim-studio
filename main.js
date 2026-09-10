@@ -26,13 +26,13 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 }
 
-function walkDirectory(root, maxFiles, onFile) {
+async function walkDirectory(root, maxFiles, onFile, onProgress) {
   const stack = [root];
   let count = 0;
   while (stack.length && count < maxFiles) {
     const current = stack.pop();
     let entries;
-    try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch { continue; }
+    try { entries = await fs.promises.readdir(current, { withFileTypes: true }); } catch { continue; }
     for (const entry of entries) {
       if (count >= maxFiles) break;
       const full = path.join(current, entry.name);
@@ -41,10 +41,11 @@ function walkDirectory(root, maxFiles, onFile) {
         continue;
       }
       try {
-        const stat = fs.statSync(full);
-        if (stat.size > 0) { onFile({ path: full, name: entry.name, size: stat.size, modified: stat.mtimeMs }); count++; }
+        const stat = await fs.promises.stat(full);
+        if (stat.size > 0) { onFile({ path: full, name: entry.name, size: stat.size, modified: stat.mtimeMs }); count++; onProgress?.(count, full); }
       } catch { /* inaccessible files are skipped */ }
     }
+    if (count % 20 === 0) await new Promise(resolve => setImmediate(resolve));
   }
   return count;
 }
@@ -89,6 +90,7 @@ function signatureCandidates(filePath, maxFiles, onProgress) {
   ];
   let fd;
   try { fd = fs.openSync(filePath, 'r'); } catch (error) { throw new Error(`読み取りに失敗しました: ${error.message}`); }
+  const totalBytes = (() => { try { return fs.fstatSync(fd).size; } catch { return 0; } })();
   const chunkSize = 4 * 1024 * 1024;
   const buffer = Buffer.alloc(chunkSize);
   let offset = 0;
@@ -116,7 +118,7 @@ function signatureCandidates(filePath, maxFiles, onProgress) {
           cursor += sig.start.length;
         }
       }
-      onProgress(Math.min(99, Math.round((offset / Math.max(offset + bytes, 1)) * 100)), found.length);
+      onProgress(Math.min(99, totalBytes ? Math.round((offset / totalBytes) * 100) : 0), found.length, offset, totalBytes);
       offset += bytes;
       carry = chunk.subarray(Math.max(0, chunk.length - 1024));
       if (found.length >= maxFiles) break;
@@ -154,19 +156,20 @@ ipcMain.handle('scan-folder', async (event, root) => {
   const results = [];
   const roots = root && root.trim() ? [root.trim()] : driveRoots().map(drive => path.join(drive, '$Recycle.Bin'));
   let count = 0;
-  for (const scanRoot of roots) count += walkDirectory(scanRoot, 5000 - count, item => {
+  for (const scanRoot of roots) count += await walkDirectory(scanRoot, 5000 - count, item => {
     const metadata = recycleMetadata(item.path);
     const displayName = metadata?.name || item.name;
     const ext = path.extname(displayName).slice(1).toLowerCase();
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi', 'mkv', 'pdf', 'docx'].includes(ext)) {
       results.push({ id: item.path, name: displayName, originalPath: metadata?.originalPath || null, extension: ext, mime: ext, size: item.size, offset: 0, source: item.path, confidence: 100, status: '確認済み' });
     }
-  });
+  }, (scanned, current) => event.sender.send('scan-progress', { progress: Math.min(99, Math.round(scanned / 50)), found: results.length, scanned, location: current }));
   return { results, scanned: count };
 });
 
 ipcMain.handle('scan-raw', async (event, source) => {
-  return signatureCandidates(rawSource(source), 300, (progress, found) => event.sender.send('scan-progress', { progress, found }));
+  const resolved = rawSource(source);
+  return signatureCandidates(resolved, 300, (progress, found, offset, total) => event.sender.send('scan-progress', { progress, found, scanned: offset, total, location: resolved }));
 });
 
 ipcMain.handle('recover', async (event, { candidate, destination }) => {

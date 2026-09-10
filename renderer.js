@@ -9,7 +9,7 @@ function fmtSize(bytes) { if (!bytes) return '未確定'; const units = ['B', 'K
 async function showPreview(index) {
   const candidate = results[index];
   $('preview-title').textContent = candidate.name;
-  $('preview-meta').textContent = `${candidate.extension.toUpperCase()} / ${fmtSize(candidate.size)} / 確度 ${candidate.confidence}%`;
+  $('preview-meta').textContent = `${candidate.extension.toUpperCase()} / ${fmtSize(candidate.size)} / 確度 ${candidate.confidence}%${candidate.originalPath ? ` / 元の場所: ${candidate.originalPath}` : ''}`;
   $('preview-image').classList.add('hidden');
   $('preview-video').classList.add('hidden');
   $('preview-empty').classList.remove('hidden');
@@ -41,18 +41,19 @@ window.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => { $('splash').classList.add('hidden'); $('app').classList.remove('hidden'); }, 2600);
   setTimeout(async () => { try { const update = await window.reclaim.checkUpdate(); if (update.available) showUpdate(update); } catch { /* update checks are optional when offline */ } }, 3200);
   window.reclaim.onUpdateProgress(progress => { $('update-progress-bar').style.width = `${progress.percent}%`; $('update-status').textContent = progress.total ? `ダウンロード中 ${progress.percent}%` : 'ダウンロード中...'; });
+  window.reclaim.onProgress(value => { const percent = value.progress || 0; $('scan-progress-bar').style.width = `${percent}%`; $('scan-percent').textContent = `${percent}%`; $('scan-found').textContent = value.found || 0; $('scan-location').textContent = value.location || '走査中...'; });
   $('browse-button').addEventListener('click', async () => { const folder = await window.reclaim.chooseFolder(); if (folder) $('source-path').value = folder; });
   document.querySelectorAll('.mode').forEach(mode => mode.addEventListener('click', () => { document.querySelectorAll('.mode').forEach(m => m.classList.remove('active')); mode.classList.add('active'); mode.querySelector('input').checked = true; }));
   $('scan-button').addEventListener('click', async () => {
     const source = $('source-path').value.trim();
-    $('scan-button').disabled = true; $('activity-status').textContent = '走査中'; $('activity-status').classList.add('running'); $('signal-value').textContent = 'SCANNING'; $('activity-message').textContent = 'ストレージを読み取り中。元データには変更を加えません。'; $('progress-bar').style.width = '2%'; startedAt = Date.now(); timer = setInterval(() => { const s = Math.floor((Date.now() - startedAt) / 1000); $('elapsed').textContent = `00:${String(s).padStart(2, '0')}`; }, 1000); setStep(1);
+    $('scan-button').disabled = true; $('scan-overlay').classList.remove('hidden'); $('scan-progress-bar').style.width = '2%'; $('scan-percent').textContent = '2%'; $('scan-found').textContent = '0'; $('scan-location').textContent = source || '接続中のドライブのごみ箱'; setStep(1);
     try {
       const mode = document.querySelector('input[name=mode]:checked').value;
-      if (mode === 'raw') { window.reclaim.onProgress(value => { $('progress-bar').style.width = `${value.progress}%`; $('found-count').textContent = value.found; }); results = await window.reclaim.scanRaw(source); $('scanned-count').textContent = 'raw drive'; }
-      else { const response = await window.reclaim.scanFolder(source); results = response.results; $('scanned-count').textContent = `${response.scanned.toLocaleString()} files`; $('found-count').textContent = results.length; $('progress-bar').style.width = '100%'; }
-      renderResults(); $('activity-message').textContent = results.length ? `${results.length} 件の候補を検出しました。復元するものを選択してください。` : '候補は見つかりませんでした。別の場所でディープスキャンを試してください。'; $('activity-status').textContent = '完了'; $('signal-value').textContent = results.length ? 'FOUND' : 'CLEAR'; setStep(2);
-    } catch (error) { showToast(error.message || 'スキャンに失敗しました'); $('activity-message').textContent = 'スキャンに失敗しました。パスと権限を確認してください。'; $('activity-status').textContent = 'エラー'; }
-    clearInterval(timer); $('scan-button').disabled = false;
+      if (mode === 'raw') { results = await window.reclaim.scanRaw(source); }
+      else { const response = await window.reclaim.scanFolder(source); results = response.results; }
+      renderResults(); $('scan-progress-bar').style.width = '100%'; $('scan-percent').textContent = '100%'; $('scan-found').textContent = results.length; setStep(2);
+    } catch (error) { showToast(error.message || 'スキャンに失敗しました'); }
+    $('scan-overlay').classList.add('hidden'); $('scan-button').disabled = false;
   });
   $('select-all').addEventListener('click', () => { const boxes = document.querySelectorAll('#results-list input[type=checkbox]'); const shouldCheck = [...boxes].some(x => !x.checked); boxes.forEach(x => x.checked = shouldCheck); });
   $('recover-button').addEventListener('click', async () => { const picks = selected(); if (!picks.length) return showToast('復元するファイルを選択してください'); const dest = await window.reclaim.chooseFolder(); if (!dest) return; $('recover-button').disabled = true; let done = 0; for (const candidate of picks) { try { await window.reclaim.recover({ candidate, destination: dest }); done++; } catch { /* continue with remaining candidates */ } } $('activity-message').textContent = `${done} 件を ${dest} に復元しました。`; showToast(`${done} 件を復元しました。保存先は自動では開きません`); setStep(2); $('recover-button').disabled = false; });
