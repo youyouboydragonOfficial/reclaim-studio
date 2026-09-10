@@ -1,8 +1,17 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 let mainWindow;
+const UPDATE_REPOSITORY = 'youyouboydragonOfficial/reclaim-studio';
+
+function compareVersions(left, right) {
+  const a = String(left).replace(/^v/, '').split('.').map(Number);
+  const b = String(right).replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < 3; i++) { if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) - (b[i] || 0); }
+  return 0;
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -161,6 +170,44 @@ ipcMain.handle('preview', async (event, candidate) => {
     const mime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' }[ext] || 'application/octet-stream';
     return { dataUrl: mime.startsWith('image/') ? `data:${mime};base64,${data.subarray(0, bytes).toString('base64')}` : null, bytes, mime };
   } finally { fs.closeSync(fd); }
+});
+
+ipcMain.handle('check-update', async () => {
+  const response = await fetch(`https://api.github.com/repos/${UPDATE_REPOSITORY}/releases/latest`, { headers: { 'User-Agent': 'Reclaim-Studio' } });
+  if (!response.ok) throw new Error(`更新情報の取得に失敗しました (${response.status})`);
+  const release = await response.json();
+  const latestVersion = String(release.tag_name || '').replace(/^v/, '');
+  const asset = (release.assets || []).find(item => /^Reclaim\.Studio\.Setup\..+\.exe$/i.test(item.name));
+  return { currentVersion: app.getVersion(), latestVersion, available: Boolean(asset) && compareVersions(latestVersion, app.getVersion()) > 0, releaseUrl: release.html_url, assetName: asset?.name || null, assetUrl: asset?.browser_download_url || null };
+});
+
+ipcMain.handle('download-update', async (event, { assetUrl, assetName }) => {
+  if (!assetUrl || !/^https:\/\/github\.com\//.test(assetUrl)) throw new Error('更新ファイルのURLが無効です');
+  const response = await fetch(assetUrl, { headers: { 'User-Agent': 'Reclaim-Studio' } });
+  if (!response.ok || !response.body) throw new Error(`更新ファイルの取得に失敗しました (${response.status})`);
+  const destination = path.join(app.getPath('temp'), assetName || 'Reclaim-Studio-Update.exe');
+  const total = Number(response.headers.get('content-length') || 0);
+  const writer = fs.createWriteStream(destination);
+  const reader = response.body.getReader();
+  let downloaded = 0;
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      writer.write(Buffer.from(part.value));
+      downloaded += part.value.length;
+      event.sender.send('update-progress', { downloaded, total, percent: total ? Math.round(downloaded / total * 100) : 0 });
+    }
+  } finally { await new Promise(resolve => writer.end(resolve)); }
+  return { path: destination };
+});
+
+ipcMain.handle('install-update', async (event, installerPath) => {
+  if (!installerPath || path.extname(installerPath).toLowerCase() !== '.exe') throw new Error('更新ファイルが見つかりません');
+  const child = spawn(installerPath, [], { detached: true, stdio: 'ignore' });
+  child.unref();
+  setTimeout(() => app.quit(), 300);
+  return true;
 });
 
 ipcMain.handle('open-folder', async (event, folder) => { await shell.openPath(folder); return true; });

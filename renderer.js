@@ -2,6 +2,7 @@ const $ = id => document.getElementById(id);
 let results = [];
 let startedAt = 0;
 let timer;
+let downloadedInstaller = null;
 
 function showToast(message) { const toast = $('toast'); toast.textContent = message; toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 3200); }
 function fmtSize(bytes) { if (!bytes) return '未確定'; const units = ['B', 'KB', 'MB', 'GB']; let i = 0; let n = bytes; while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; } return `${n.toFixed(i ? 1 : 0)} ${units[i]}`; }
@@ -28,9 +29,16 @@ function renderResults() {
 }
 function selected() { return [...document.querySelectorAll('#results-list input[type=checkbox]:checked')].map(x => results[Number(x.dataset.index)]); }
 function setStep(step) { document.querySelectorAll('.step').forEach((node, i) => node.classList.toggle('active', i <= step)); }
+function showUpdate(info) {
+  $('update-version').textContent = `v${info.latestVersion} へ更新`;
+  $('update-copy').textContent = `現在の v${info.currentVersion} より新しいバージョンがあります。アプリ内でダウンロードして更新できます。`;
+  $('update-modal').classList.remove('hidden');
+}
 
 window.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => { $('splash').classList.add('hidden'); $('app').classList.remove('hidden'); }, 2600);
+  setTimeout(async () => { try { const update = await window.reclaim.checkUpdate(); if (update.available) showUpdate(update); } catch { /* update checks are optional when offline */ } }, 3200);
+  window.reclaim.onUpdateProgress(progress => { $('update-progress-bar').style.width = `${progress.percent}%`; $('update-status').textContent = progress.total ? `ダウンロード中 ${progress.percent}%` : 'ダウンロード中...'; });
   $('browse-button').addEventListener('click', async () => { const folder = await window.reclaim.chooseFolder(); if (folder) $('source-path').value = folder; });
   document.querySelectorAll('.mode').forEach(mode => mode.addEventListener('click', () => { document.querySelectorAll('.mode').forEach(m => m.classList.remove('active')); mode.classList.add('active'); mode.querySelector('input').checked = true; }));
   $('scan-button').addEventListener('click', async () => {
@@ -48,4 +56,12 @@ window.addEventListener('DOMContentLoaded', () => {
   $('recover-button').addEventListener('click', async () => { const picks = selected(); if (!picks.length) return showToast('復元するファイルを選択してください'); const dest = await window.reclaim.chooseFolder(); if (!dest) return; $('recover-button').disabled = true; let done = 0; for (const candidate of picks) { try { await window.reclaim.recover({ candidate, destination: dest }); done++; } catch { /* continue with remaining candidates */ } } $('activity-message').textContent = `${done} 件を ${dest} に復元しました。`; showToast(`${done} 件を復元しました。保存先は自動では開きません`); setStep(2); $('recover-button').disabled = false; });
   $('info-button').addEventListener('click', () => $('modal').classList.remove('hidden')); $('modal-close').addEventListener('click', () => $('modal').classList.add('hidden')); $('modal-ok').addEventListener('click', () => $('modal').classList.add('hidden'));
   $('preview-close').addEventListener('click', () => $('preview-modal').classList.add('hidden')); $('preview-modal').addEventListener('click', event => { if (event.target === $('preview-modal')) $('preview-modal').classList.add('hidden'); });
+  $('update-later').addEventListener('click', () => $('update-modal').classList.add('hidden'));
+  $('update-now').addEventListener('click', async () => {
+    const button = $('update-now');
+    if (downloadedInstaller) { $('update-status').textContent = 'アプリを再起動して更新します...'; await window.reclaim.installUpdate(downloadedInstaller); return; }
+    button.disabled = true; $('update-status').textContent = '更新ファイルをダウンロード中...';
+    try { const update = await window.reclaim.checkUpdate(); const downloaded = await window.reclaim.downloadUpdate({ assetUrl: update.assetUrl, assetName: update.assetName }); downloadedInstaller = downloaded.path; $('update-progress-bar').style.width = '100%'; $('update-status').textContent = 'ダウンロード完了。再起動して更新できます。'; button.textContent = '再起動して更新'; button.disabled = false; }
+    catch (error) { $('update-status').textContent = error.message || '更新に失敗しました。'; button.disabled = false; }
+  });
 });
