@@ -28,7 +28,7 @@ function walkDirectory(root, maxFiles, onFile) {
       if (count >= maxFiles) break;
       const full = path.join(current, entry.name);
       if (entry.isDirectory()) {
-        if (!['System Volume Information', '$RECYCLE.BIN', 'node_modules'].includes(entry.name)) stack.push(full);
+        if (!['System Volume Information', 'node_modules'].includes(entry.name)) stack.push(full);
         continue;
       }
       try {
@@ -38,6 +38,21 @@ function walkDirectory(root, maxFiles, onFile) {
     }
   }
   return count;
+}
+
+function driveRoots() {
+  const roots = [];
+  for (let code = 67; code <= 90; code++) {
+    const root = `${String.fromCharCode(code)}:\\`;
+    if (fs.existsSync(root)) roots.push(root);
+  }
+  return roots;
+}
+
+function rawSource(source) {
+  const value = (source || 'C:\\').trim();
+  const drive = value.match(/^([A-Za-z]):\\?$/);
+  return drive ? `\\\\.\\${drive[1].toUpperCase()}:` : value;
 }
 
 function signatureCandidates(filePath, maxFiles, onProgress) {
@@ -115,7 +130,9 @@ ipcMain.handle('choose-folder', async () => {
 
 ipcMain.handle('scan-folder', async (event, root) => {
   const results = [];
-  const count = walkDirectory(root, 5000, item => {
+  const roots = root && root.trim() ? [root.trim()] : driveRoots().map(drive => path.join(drive, '$Recycle.Bin'));
+  let count = 0;
+  for (const scanRoot of roots) count += walkDirectory(scanRoot, 5000 - count, item => {
     const ext = path.extname(item.name).slice(1).toLowerCase();
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi', 'mkv', 'pdf', 'docx'].includes(ext)) {
       results.push({ id: item.path, name: item.name, extension: ext, mime: ext, size: item.size, offset: 0, source: item.path, confidence: 100, status: '確認済み' });
@@ -125,12 +142,25 @@ ipcMain.handle('scan-folder', async (event, root) => {
 });
 
 ipcMain.handle('scan-raw', async (event, source) => {
-  return signatureCandidates(source, 300, (progress, found) => event.sender.send('scan-progress', { progress, found }));
+  return signatureCandidates(rawSource(source), 300, (progress, found) => event.sender.send('scan-progress', { progress, found }));
 });
 
 ipcMain.handle('recover', async (event, { candidate, destination }) => {
   const output = recoverCandidate(candidate, destination);
   return { output };
+});
+
+ipcMain.handle('preview', async (event, candidate) => {
+  const limit = 6 * 1024 * 1024;
+  const size = Math.min(candidate.size || limit, limit);
+  const fd = fs.openSync(candidate.source, 'r');
+  const data = Buffer.alloc(size);
+  try {
+    const bytes = fs.readSync(fd, data, 0, size, candidate.offset || 0);
+    const ext = String(candidate.extension || '').toLowerCase();
+    const mime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' }[ext] || 'application/octet-stream';
+    return { dataUrl: mime.startsWith('image/') ? `data:${mime};base64,${data.subarray(0, bytes).toString('base64')}` : null, bytes, mime };
+  } finally { fs.closeSync(fd); }
 });
 
 ipcMain.handle('open-folder', async (event, folder) => { await shell.openPath(folder); return true; });
