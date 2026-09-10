@@ -10,7 +10,7 @@ function createWindow() {
     height: 900,
     minWidth: 1080,
     minHeight: 700,
-    backgroundColor: '#0b1016',
+    backgroundColor: '#f4f7f8',
     title: 'Reclaim Studio',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: false }
   });

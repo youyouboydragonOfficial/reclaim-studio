@@ -1,6 +1,6 @@
 {
   "name": "reclaim-studio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A focused Windows file recovery utility for deleted photos, videos and documents.",
   "main": "main.js",
   "author": "OpenAI",
@@ -19,7 +19,10 @@
     "compression": "maximum",
     "asar": true,
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "requestedExecutionLevel": "requireAdministrator",
       "signAndEditExecutable": false
     },
