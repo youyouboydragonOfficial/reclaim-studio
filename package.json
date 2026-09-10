@@ -1,0 +1,33 @@
+{
+  "name": "reclaim-studio",
+  "version": "0.1.0",
+  "description": "A focused Windows file recovery utility for deleted photos, videos and documents.",
+  "main": "main.js",
+  "author": "OpenAI",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis portable"
+  },
+  "devDependencies": {
+    "electron": "^32.2.7",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.reclaimstudio.app",
+    "productName": "Reclaim Studio",
+    "compression": "maximum",
+    "asar": true,
+    "win": {
+      "target": ["nsis", "portable"],
+      "requestedExecutionLevel": "requireAdministrator",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
